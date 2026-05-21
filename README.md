@@ -1,4 +1,4 @@
-# Invoe v1.1
+# Invoe v1.2
 
 **[→ Open App](https://sorrythisisai.github.io/Invoe/)**
 
