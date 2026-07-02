@@ -1241,7 +1241,7 @@ function drawDonut(segments, centerVal, centerSub) {
   const leg = document.getElementById('mo-legend');
   if (!leg) return;
   leg.innerHTML = '';
-  const clickable = moTab !== 'orders';
+  const clickable = true; // все три вкладки теперь показывают суммы по клиентам — клик для фильтра логичен везде
   segments.slice(0,6).forEach((seg,i) => {
     const row = el('div', {
       className:'mo-leg-row'+(clickable?'':' no-click'),
@@ -1304,12 +1304,21 @@ function renderDonut() {
     centerVal = tot!==null?fmtB(tot):(segments.length===1?segments[0].display:'—');
 
   } else if (moTab === 'orders') {
+    // Оборот за период: сумма ВСЕХ заказов (оплаченных и нет), сделанных в этом месяце.
+    // Раньше здесь считалось количество заказов — теперь считаем сумму,
+    // как и в «Доходах»/«Ожидаем», чтобы видно было «на сколько наработано», а не «сколько штук».
     setText('mo-title', t.moTitle(mn.getMonth(), mn.getFullYear()));
     const ord = entries.filter(e=>(e.date||'').startsWith(msYM));
     const byClient = {};
-    ord.forEach(e=>{const n=e.name||'—';byClient[n]=(byClient[n]||0)+1;});
-    segments = Object.entries(byClient).sort((a,b)=>b[1]-a[1]).map(([name,cnt])=>({label:name,value:cnt,display:String(cnt)}));
-    centerVal = String(ord.length);
+    ord.forEach(e => {
+      const n = e.name||'—';
+      const v = toB(e.amount,e.currency)??e.amount;
+      byClient[n]=(byClient[n]||0)+v;
+    });
+    const sorted = Object.entries(byClient).sort((a,b)=>b[1]-a[1]);
+    segments = sorted.map(([name,sum])=>({label:name,value:sum,display:fmtB(sum)}));
+    const tot = totB(ord);
+    centerVal = tot!==null?fmtB(tot):(segments.length===1?segments[0].display:'—');
 
   } else {
     
@@ -1777,7 +1786,7 @@ function render() {
   const sorted=[...gs.entries()].sort((a,b)=>grpSort(b[0]).localeCompare(grpSort(a[0])));
   const frag = document.createDocumentFragment();
   for(const[k,g]of sorted){
-    const sg=[...g].sort((a,b)=>{if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return -1;return b.date.localeCompare(a.date);});
+    const sg=[...g].sort((a,b)=>{if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return-1;return b.date.localeCompare(a.date);});
     frag.appendChild(el('div',{className:'group-lbl'},[grpLabel(k)]));
     sg.forEach(e=>frag.appendChild(renderEntry(e)));
   }
