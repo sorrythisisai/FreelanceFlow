@@ -1321,9 +1321,15 @@ function renderDonut() {
     centerVal = tot!==null?fmtB(tot):(segments.length===1?segments[0].display:'—');
 
   } else {
-    
-    setText('mo-title', t.moTitleAwaiting);
-    const period = entries.filter(e=>!e.paid);
+    // Не оплачено ИЗ ЭТОГО ПЕРИОДА: раньше здесь игнорировался выбор месяца сверху
+    // и всегда показывалась одна и та же цифра — все неоплаченные за всё время.
+    // Из-за этого переключение периода никак не влияло на вкладку «Ожидаем»,
+    // и узнать «сколько не оплачено именно за прошлый месяц» было невозможно.
+    // Теперь фильтруем по дате заказа внутри выбранного периода (как и «Заказы»),
+    // но только неоплаченные. Карточка «Ожидаем» в сайдбаре — отдельная метрика,
+    // она как и раньше показывает общий долг за всё время, это осталось без изменений.
+    setText('mo-title', t.moTitle(mn.getMonth(), mn.getFullYear()));
+    const period = entries.filter(e=>!e.paid && (e.date||'').startsWith(msYM));
     const byClient = {};
     period.forEach(e=>{
       const n = e.name||'—';
