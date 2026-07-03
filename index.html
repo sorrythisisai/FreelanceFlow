@@ -886,6 +886,8 @@ const T = {
     moTitle:(m,y)=>`Операции в ${MONTHS_GEN_RU[m]} ${y}`,
     
     moTitleAwaiting:'Все неоплаченные',
+    periodAllTime:'Все время',
+    moTitleAll:'Операции за всё время',
     moEarned:'Доходы',moOrders:'Заказы',moAwaiting:'Ожидаем',
     lDesc:'Работа / Проект',lAmt:'Сумма',lCur:'Валюта',lName:'Клиент',lNote:'Описание',lDate:'Дата',lPaidAt:'Дата оплаты',
     lStatus:'Статус оплаты',
@@ -923,6 +925,8 @@ const T = {
     btnAdd:'+ Add',btnInv:'Invoice',
     moTitle:(m,y)=>`${MONTHS_EN[m]} ${y} overview`,
     moTitleAwaiting:'All unpaid',
+    periodAllTime:'All time',
+    moTitleAll:'All-time overview',
     moEarned:'Income',moOrders:'Orders',moAwaiting:'Awaiting',
     lDesc:'Work / Project',lAmt:'Amount',lCur:'Currency',lName:'Client',lNote:'Note',lDate:'Date',lPaidAt:'Payment date',
     lStatus:'Payment status',
@@ -1004,7 +1008,8 @@ try {
   if (typeof rates !== 'object' || Array.isArray(rates)) throw 0;
 } catch(e) { rates = {}; }
 const CURS = ['₽','$','€','£','¥'];
-let pOff = parseInt(lsG('ff_period') || '0');
+let _pOffRaw = lsG('ff_period');
+let pOff = _pOffRaw === 'all' ? 'all' : (parseInt(_pOffRaw || '0') || 0); // 'all' — режим «за всё время», иначе смещение месяца
 let moTab = lsG('ff_motab') || 'earned';
 let selIds = new Set();
 let srchTmr = null;
@@ -1025,6 +1030,11 @@ function Z(n) { return String(n).padStart(2,'0'); }
 function yest() { const d=new Date(); d.setDate(d.getDate()-1); return `${d.getFullYear()}-${Z(d.getMonth()+1)}-${Z(d.getDate())}`; }
 function cmYM() { const d=new Date(); return `${d.getFullYear()}-${Z(d.getMonth()+1)}`; }
 function ymOff(o) { const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+o); return `${d.getFullYear()}-${Z(d.getMonth()+1)}`; }
+function matchesPeriod(dateStr) {
+  if (pOff === 'all') return true; // «за всё время» — период не фильтрует ничего
+  const msYM = ymOff(pOff);
+  return (dateStr||'').startsWith(msYM);
+}
 function gid() { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9); }
 function s2id(s) { return encodeURIComponent(s).replace(/%/g,'x'); }
 
@@ -1168,6 +1178,11 @@ function buildPeriodDd() {
   const now = new Date();
   const loc = lang==='en'?'en-US':'ru-RU';
   dd.innerHTML = '';
+  // «Все время» — отдельный пункт сверху, вне помесячного списка
+  const allItem = el('div',{className:'period-dd-item'+(pOff==='all'?' on':''), role:'option'}, [T[lang].periodAllTime]);
+  allItem.addEventListener('click', ()=>selectPeriod('all'));
+  dd.appendChild(allItem);
+  dd.appendChild(el('div',{style:'height:1px;background:var(--border);margin:5px 4px;'}));
   for (let o=0; o>=-11; o--) {
     const d = new Date(now.getFullYear(), now.getMonth()+o, 1);
     let lbl = d.toLocaleDateString(loc,{month:'long',year:'numeric'});
@@ -1276,9 +1291,16 @@ function setMoTab(tab) {
 
 function renderDonut() {
   const t = T[lang];
-  const msYM = ymOff(pOff);
-  const mn = new Date();
-  mn.setDate(1); mn.setMonth(mn.getMonth()+pOff);
+  // Заголовок карточки: для конкретного месяца — «Операции в мае», для режима
+  // «Все время» — отдельный текст без месяца/года (pOff==='all' пропускает фильтр по дате).
+  let periodTitle;
+  if (pOff === 'all') {
+    periodTitle = t.moTitleAll;
+  } else {
+    const mn = new Date();
+    mn.setDate(1); mn.setMonth(mn.getMonth()+pOff);
+    periodTitle = t.moTitle(mn.getMonth(), mn.getFullYear());
+  }
 
   // Обновляем табы
   setText('mo-tab-earn', t.moEarned);
@@ -1289,9 +1311,8 @@ function renderDonut() {
   const sub = t.donutSub;
 
   if (moTab === 'earned') {
-    
-    setText('mo-title', t.moTitle(mn.getMonth(), mn.getFullYear()));
-    const period = entries.filter(e => e.paid && (e.paidAt||e.date||'').startsWith(msYM));
+    setText('mo-title', periodTitle);
+    const period = entries.filter(e => e.paid && matchesPeriod(e.paidAt||e.date));
     const byClient = {};
     period.forEach(e => {
       const n = e.name||'—';
@@ -1304,32 +1325,20 @@ function renderDonut() {
     centerVal = tot!==null?fmtB(tot):(segments.length===1?segments[0].display:'—');
 
   } else if (moTab === 'orders') {
-    // Оборот за период: сумма ВСЕХ заказов (оплаченных и нет), сделанных в этом месяце.
-    // Раньше здесь считалось количество заказов — теперь считаем сумму,
-    // как и в «Доходах»/«Ожидаем», чтобы видно было «на сколько наработано», а не «сколько штук».
-    setText('mo-title', t.moTitle(mn.getMonth(), mn.getFullYear()));
-    const ord = entries.filter(e=>(e.date||'').startsWith(msYM));
+    // Количество заказов за период — это счётчик проделанной работы, не деньги.
+    // Финансовая часть («сколько не оплачено за этот период») — во вкладке «Ожидаем».
+    setText('mo-title', periodTitle);
+    const ord = entries.filter(e=>matchesPeriod(e.date));
     const byClient = {};
-    ord.forEach(e => {
-      const n = e.name||'—';
-      const v = toB(e.amount,e.currency)??e.amount;
-      byClient[n]=(byClient[n]||0)+v;
-    });
-    const sorted = Object.entries(byClient).sort((a,b)=>b[1]-a[1]);
-    segments = sorted.map(([name,sum])=>({label:name,value:sum,display:fmtB(sum)}));
-    const tot = totB(ord);
-    centerVal = tot!==null?fmtB(tot):(segments.length===1?segments[0].display:'—');
+    ord.forEach(e=>{const n=e.name||'—';byClient[n]=(byClient[n]||0)+1;});
+    segments = Object.entries(byClient).sort((a,b)=>b[1]-a[1]).map(([name,cnt])=>({label:name,value:cnt,display:String(cnt)}));
+    centerVal = String(ord.length);
 
   } else {
-    // Не оплачено ИЗ ЭТОГО ПЕРИОДА: раньше здесь игнорировался выбор месяца сверху
-    // и всегда показывалась одна и та же цифра — все неоплаченные за всё время.
-    // Из-за этого переключение периода никак не влияло на вкладку «Ожидаем»,
-    // и узнать «сколько не оплачено именно за прошлый месяц» было невозможно.
-    // Теперь фильтруем по дате заказа внутри выбранного периода (как и «Заказы»),
-    // но только неоплаченные. Карточка «Ожидаем» в сайдбаре — отдельная метрика,
-    // она как и раньше показывает общий долг за всё время, это осталось без изменений.
-    setText('mo-title', t.moTitle(mn.getMonth(), mn.getFullYear()));
-    const period = entries.filter(e=>!e.paid && (e.date||'').startsWith(msYM));
+    // Не оплачено ИЗ ЭТОГО ПЕРИОДА (включая режим «Все время» — тогда это просто
+    // весь текущий долг, что совпадает с карточкой «Ожидаем» в сайдбаре).
+    setText('mo-title', periodTitle);
+    const period = entries.filter(e=>!e.paid && matchesPeriod(e.date));
     const byClient = {};
     period.forEach(e=>{
       const n = e.name||'—';
@@ -1742,17 +1751,16 @@ function rebuildClientSel() {
 function render() {
   rebuildClientSel();
   const t = T[lang];
-  const msYM = ymOff(pOff);
 
-  // Awaiting (все неоплаченные)
+  // Awaiting (все неоплаченные, всегда за всё время — эта карточка от периода не зависит)
   const ua = entries.filter(e=>!e.paid);
   const uaMap = sBC(ua); const uaTot = totB(ua);
   setText('val-await', uaTot!==null?fmtB(uaTot):(Object.keys(uaMap).length===1?fmtMap(uaMap):'…'));
   const awMulti = document.getElementById('val-await-multi');
   if(awMulti){awMulti.innerHTML=''; if(Object.keys(uaMap).length>1)awMulti.appendChild(multiChips(uaMap));}
 
-  // Received (оплаченные в выбранном периоде по paidAt)
-  const recv = entries.filter(e=>{ if(!e.paid)return false; const d=e.paidAt||e.date; return d&&d.startsWith(msYM); });
+  // Received (оплаченные в выбранном периоде по paidAt; учитывает и режим «Все время»)
+  const recv = entries.filter(e=>{ if(!e.paid)return false; return matchesPeriod(e.paidAt||e.date); });
   const recvMap = sBC(recv); const recvTot = totB(recv);
   setText('val-recv', recvTot!==null?fmtB(recvTot):(Object.keys(recvMap).length===1?fmtMap(recvMap):'…'));
   const recvMulti = document.getElementById('val-recv-multi');
